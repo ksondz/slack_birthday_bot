@@ -22,9 +22,7 @@ module.exports = new class BirthdayBot {
     await this.authenticate();
 
     await this.rtm.start();
-
     await this.__subscribe();
-    await this.__welcomeMessage();
   }
 
   /**
@@ -40,70 +38,117 @@ module.exports = new class BirthdayBot {
     });
   }
 
-
-  /**
-    *
-    * @private
-    */
-  async __welcomeMessage() {
-    const channels = await this.__getChannels();
-
-    channels.forEach(async channel => {
-      if (channel.name === 'general') {
-        await this.web.chat.postMessage({
-          channel: channel.id,
-          text: `Get Ready To Work With <@${this.authUser.id}>!`,
-          icon_emoji: ':smiley:',
-        });
-      }
-    });
-  }
-
   /**
     * @private
     */
   async __subscribe() {
 
     this.rtm.on('message', async data => {
-      if (data.type !== 'message') { return; }
+      if ((data.type === 'message') && !this.__isBotMessage(data)) {
 
-      if (data.bot_id === this.authUser.profile.bot_id) { return; }
-
-      if (await this.__isPrivateBirthdayBotChannel(data.channel)) {
-        switch (true) {
-          case(data.text.includes('chucknorris')):
-            const jokeResponse = await axios.get('http://api.icndb.com/jokes/random');
-            await this.__postMessage({ channel: data.channel, text: `Chuck Norris: ${jokeResponse.data.value.joke}`, icon_emoji: ':laughing:' });
-
-            break;
-          case(data.text.includes('yomama')):
-            const yomommaResponse = await axios.get('http://api.yomomma.info');
-            await this.__postMessage({ channel: data.channel, text: `Yo Mama: ${yomommaResponse.data.joke}`, icon_emoji: ':laughing:' });
-
-            break;
-          case(data.text.includes('help')):
-            await this.__postMessage({ channel: data.channel, text: `Type @jokebot with either 'chucknorris' or 'yomama' to get a joke`, icon_emoji: ':question:' });
-            break;
-          case(data.text.includes('Hi')):
-          case(data.text.includes('hi')):
-          case(data.text.includes('hey')):
-          case(data.text.includes('Hey')):
-          case(data.text.includes('Hello')):
-          case(data.text.includes('hello')):
-            const users = await this.__getUsers();
-
-            users.forEach(async user => {
-              if (data.user === user.id) {
-                await this.__postMessage({ channel: data.channel, text: `Hello, <@${user.id}> !` });
-              }
-            });
-            break;
-          default:
-            const text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
-            await this.__postMessage({ channel: data.channel, text, icon_emoji: ':sunglasses:' });
+        if (await this.__isPrivateBotChannel(data.channel)) {
+          await this.__handleMessage(data);
         }
       }
     });
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __handleMessage(data) {
+    switch (true) {
+      case(data.text.includes('help')):
+        await this.__helpResponse(data);
+        break;
+      default:
+        const text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
+        await this.__postMessage({ channel: data.channel, text, icon_emoji: ':sunglasses:' });
+    }
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __usersBirthdayDatesResponse(data) {
+
+    const users = await this.__getUsersBirthdayDates();
+    const attachments = [];
+
+    await this.__postMessage({
+      channel: data.channel,
+      text: "Users birthday dates",
+      attachments: [
+        {
+          "text": "User 1234 - 12.12.2018"
+        },
+        {
+          "text": "User 1234 - 12.12.2018"
+        }
+      ]
+    });
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __helpResponse(data) {
+
+    await this.__postMessage({
+      channel: data.channel,
+      text: "Would you like to play a game?",
+      attachments: [
+        {
+          "text": "Choose a game to play",
+          "fallback": "You are unable to choose a game",
+          "callback_id": "wopr_game",
+          "color": "#3AA3E3",
+          "attachment_type": "default",
+          "actions": [
+            {
+              "name": "game",
+              "text": "Chess",
+              "type": "button",
+              "value": "chess"
+            },
+            {
+              "name": "game",
+              "text": "Falken's Maze",
+              "type": "button",
+              "value": "maze"
+            },
+            {
+              "name": "game",
+              "text": "Thermonuclear War",
+              "style": "danger",
+              "type": "button",
+              "value": "war",
+              "confirm": {
+                "title": "Are you sure?",
+                "text": "Wouldn't you prefer a good game of chess?",
+                "ok_text": "Yes",
+                "dismiss_text": "No"
+              }
+            }
+          ]
+        }
+      ]
+    });
+  }
+
+  /**
+   * @param data
+   * @returns {boolean}
+   * @private
+   */
+  __isBotMessage(data) {
+    return (data.bot_id === this.authUser.profile.bot_id);
   }
 
   /**
@@ -111,7 +156,7 @@ module.exports = new class BirthdayBot {
    * @param channelId
    * @returns {Promise<WebAPICallResult | boolean>}
    */
-  async __isPrivateBirthdayBotChannel(channelId) {
+  async __isPrivateBotChannel(channelId) {
     const users = await this.__getConversationUsers(channelId);
 
     return (users.length === 2) && users.includes(this.authUser.id);
@@ -123,15 +168,6 @@ module.exports = new class BirthdayBot {
    */
   async __postMessage(params = {}) {
     return await this.web.chat.postMessage(params);
-  }
-
-  /**
-   * @returns {Promise<any>}
-   * @private
-   */
-  async __getChannels() {
-    const channelsList = await this.web.channels.list();
-    return (channelsList && channelsList.channels) ? channelsList.channels : [];
   }
 
   /**
