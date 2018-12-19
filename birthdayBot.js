@@ -1,14 +1,22 @@
 
-const axios = require('axios');
+const fs = require('fs');
 const { WebClient, RTMClient } = require('@slack/client');
 
 module.exports = new class BirthdayBot {
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get DB_FILE_PATH() {
+    return './birthdays-db.json';
+  }
 
 
   constructor() {
     const { token } = process.env;
     if (!token) {
-      throw new Error('Please create .env file in the root application folder. You can copy .env_example.');
+      throw new Error('Please create .env file in the root application folder. You can copy .env-example.');
     }
 
     this.rtm = new RTMClient(token);
@@ -63,6 +71,13 @@ module.exports = new class BirthdayBot {
       case(data.text.includes('help')):
         await this.__helpResponse(data);
         break;
+      case(data.text.includes('users:list')):
+        await this.__usersBirthdayDatesResponse(data);
+        break;
+      case(data.text.includes('users:edit')):
+        await this.__editUserBirthdayDate(data);
+        await this.__usersBirthdayDatesResponse(data);
+        break;
       default:
         const text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
         await this.__postMessage({ channel: data.channel, text, icon_emoji: ':sunglasses:' });
@@ -74,23 +89,47 @@ module.exports = new class BirthdayBot {
    * @returns {Promise<void>}
    * @private
    */
-  async __usersBirthdayDatesResponse(data) {
+  async __editUserBirthdayDate(data) {
+    const textParts = data.text.split(':');
 
-    const users = await this.__getUsersBirthdayDates();
+    if ((textParts.length > 3) && (textParts[0] === 'users') && (textParts[1] === 'edit')) {
+      const dateParts = textParts[3].split('.');
+      if (dateParts.length === 3) {
+        const date = new Date(dateParts[2], dateParts[1], dateParts[0]);
+
+        if (date.getFullYear() && date.getMonth() && date.getDay()) {
+          const db = await this.__getDb();
+
+          if (!db.users[textParts[2]]) {
+            db.users[textParts[2]] = {};
+          }
+
+          db.users[textParts[2]].birthdayDate = `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`;
+          await this.__refreshDb(db);
+        }
+      }
+    }
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __usersBirthdayDatesResponse(data) {
+    const birthdayUsers = await this.__getBirthdayUsers();
     const attachments = [];
 
-    await this.__postMessage({
-      channel: data.channel,
-      text: "Users birthday dates",
-      attachments: [
-        {
-          "text": "User 1234 - 12.12.2018"
-        },
-        {
-          "text": "User 1234 - 12.12.2018"
-        }
-      ]
+    Object.keys(birthdayUsers).forEach(userId => {
+      const user = birthdayUsers[userId];
+
+      attachments.push({
+        color: user.birthdayDate ? 'good' : "danger",
+        text: `${user.real_name} (${user.id}) - ${user.birthdayDate || 'is not defined'}`
+      });
     });
+
+    await this.__postMessage({ channel: data.channel, text: "Users birthday dates", attachments });
   }
 
   /**
@@ -143,6 +182,36 @@ module.exports = new class BirthdayBot {
   }
 
   /**
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __getBirthdayUsers() {
+    const db = this.__getDb();
+    const users = await this.__getUsers();
+    const birthdayUsers = {};
+
+    users.forEach(user => {
+      if (!user.is_bot && user.profile && user.profile.email) {
+        birthdayUsers[user.id] = { ...user };
+
+        if (db.users[user.id]) {
+          birthdayUsers[user.id].birthdayDate = db.users[user.id].birthdayDate;
+        }
+      }
+    });
+
+    return birthdayUsers;
+  }
+
+  /**
+   * @param params
+   * @returns {Promise<WebAPICallResult>}
+   */
+  async __postMessage(params = {}) {
+    return await this.web.chat.postMessage(params);
+  }
+
+  /**
    * @param data
    * @returns {boolean}
    * @private
@@ -158,16 +227,7 @@ module.exports = new class BirthdayBot {
    */
   async __isPrivateBotChannel(channelId) {
     const users = await this.__getConversationUsers(channelId);
-
     return (users.length === 2) && users.includes(this.authUser.id);
-  }
-
-  /**
-   * @param params
-   * @returns {Promise<WebAPICallResult>}
-   */
-  async __postMessage(params = {}) {
-    return await this.web.chat.postMessage(params);
   }
 
   /**
@@ -186,5 +246,27 @@ module.exports = new class BirthdayBot {
   async __getConversationUsers(channelId) {
     const result = await this.web.conversations.members({ channel: channelId });
     return result && result.members ? result.members : [];
+  }
+
+  /**
+   * @returns {{}}
+   */
+  __getDb() {
+    if (fs.existsSync(BirthdayBot.DB_FILE_PATH)) {
+      const db = fs.readFileSync(BirthdayBot.DB_FILE_PATH);
+      return JSON.parse(db);
+    }
+
+    return {
+      manager: false,
+      users: {},
+    };
+  }
+
+  /**
+   * @param data
+   */
+  __refreshDb(data) {
+    fs.writeFileSync(BirthdayBot.DB_FILE_PATH, JSON.stringify(data));
   }
 }();
