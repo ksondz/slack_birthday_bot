@@ -119,17 +119,19 @@ module.exports = new class BirthdayBot {
   async __usersBirthdayDatesResponse(data) {
     const birthdayUsers = await this.__getBirthdayUsers();
     const attachments = [];
+    const now = new Date();
 
     Object.keys(birthdayUsers).forEach(userId => {
       const user = birthdayUsers[userId];
+      const birthday = `${user.birthdayDate || 'is not defined'}`;
 
       attachments.push({
         color: user.birthdayDate ? 'good' : "danger",
-        text: `${user.real_name} (${user.id}) - ${user.birthdayDate || 'is not defined'}`
+        text: `${user.real_name} (${user.id}) - ${birthday}  \n Set or edit birthday date - users:edit:${user.id}:22.08.${now.getFullYear()}`
       });
     });
 
-    await this.__postMessage({ channel: data.channel, text: "Users birthday dates", attachments });
+    await this.__postMessage({ channel: data.channel, text: "Users birthday list", attachments });
   }
 
   /**
