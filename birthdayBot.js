@@ -1,8 +1,139 @@
 
 const fs = require('fs');
+const moment = require('moment');
 const { WebClient, RTMClient } = require('@slack/client');
 
 module.exports = new class BirthdayBot {
+
+  /**
+   * @returns {*}
+   */
+  static getDb() {
+    if (fs.existsSync(BirthdayBot.DB_FILE_PATH)) {
+      const db = fs.readFileSync(BirthdayBot.DB_FILE_PATH);
+      return JSON.parse(db);
+    }
+
+    return { manager: false, users: {} };
+  }
+
+  /**
+   * @param data
+   */
+  static refreshDb(data) {
+    fs.writeFileSync(BirthdayBot.DB_FILE_PATH, JSON.stringify(data));
+  }
+
+  /**
+   * @returns object
+   */
+  static getMonths() {
+    if (fs.existsSync(BirthdayBot.MONTHS_FILE_PATH)) {
+      const data = JSON.parse(fs.readFileSync(BirthdayBot.MONTHS_FILE_PATH));
+      return data || {};
+    }
+
+    return {};
+  }
+
+  /**
+   * @param userId
+   * @param month
+   * @param day
+   */
+  static editUserBirthday(userId, month = null, day = null) {
+    const db = BirthdayBot.getDb();
+
+    if (!db.users[userId]) {
+      db.users[userId] = { birthday: { month, day } };
+    } else {
+      db.users[userId].birthday.month = month || db.users[userId].birthday.month;
+      db.users[userId].birthday.day = day || db.users[userId].birthday.day;
+    }
+
+    BirthdayBot.refreshDb(db);
+  }
+
+  /**
+   * @param user
+   * @returns {{color: string, callback_id: string, text: string, fallback: string, actions: *[]}}
+   */
+  static renderUsersListAttachment(user) {
+    let actions = BirthdayBot.getUserSelectActions(user);
+
+    let text = `${user.real_name} - `;
+    let color = 'danger';
+
+    switch (true) {
+      case (user.birthday && !!user.birthday.month && !!user.birthday.day):
+        text += `${user.birthday.month} ${user.birthday.day || ''}`;
+        color = 'good';
+        break;
+      case (user.birthday && !user.birthday.day):
+        text += 'birthday day is not defined';
+        break;
+      default:
+        text += 'birthday is not defined';
+    }
+
+    return {
+      text,
+      actions,
+      color,
+      fallback: 'You can not edit users',
+      callback_id: `${user.id}`,
+    };
+  }
+
+  /**
+   * @param user
+   * @returns {*[]}
+   */
+  static getUserSelectActions(user) {
+    const months = BirthdayBot.getMonths();
+
+    const monthSelect = { name: 'month', user: { id: user.id }, type: 'select', options: [], selected_options: [] };
+    const daySelect = { name: 'day', user: { id: user.id }, type: 'select', options: [], selected_options: [] };
+
+    Object.keys(months).forEach(monthName => {
+      BirthdayBot.addMonthAndDaySelectOptions(monthSelect, daySelect, months[monthName], user);
+    });
+
+    return [monthSelect, daySelect];
+  }
+
+  /**
+   * @param monthSelect
+   * @param daySelect
+   * @param monthData
+   * @param user
+   */
+  static addMonthAndDaySelectOptions(monthSelect, daySelect, monthData, user) {
+    const monthOption = { text: monthData.name, value: monthData.name };
+    monthSelect.options.push(monthOption);
+
+    if (user.birthday && (user.birthday.month === monthData.name)) {
+      monthSelect.selected_options.push(monthOption);
+      BirthdayBot.addDaySelectOptions(daySelect, monthData.days, user.birthday.day);
+    }
+  }
+
+  /**
+   * @param daySelect
+   * @param daysAmount
+   * @param selectedDay
+   */
+  static addDaySelectOptions(daySelect, daysAmount, selectedDay) {
+    const day = parseInt(selectedDay, 10);
+    for (let i = 1; i <= daysAmount; i++ ) {
+      const dayOption = { text: i, value: `${i}` };
+
+      if (day === i) {
+        daySelect.selected_options.push(dayOption);
+      }
+      daySelect.options.push(dayOption);
+    }
+  }
 
   /**
    * @returns {string}
@@ -10,6 +141,26 @@ module.exports = new class BirthdayBot {
    */
   static get DB_FILE_PATH() {
     return './birthdays-db.json';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get MONTHS_FILE_PATH() {
+    return './months.json';
+  }
+
+  /**
+   * @param descriptionString
+   * @returns {*}
+   */
+  static jsonParse(descriptionString) {
+    try {
+      return JSON.parse(descriptionString);
+    } catch (e) {
+      return false;
+    }
   }
 
 
@@ -47,6 +198,76 @@ module.exports = new class BirthdayBot {
   }
 
   /**
+   * @param data
+   * @returns {Promise<void>}
+   */
+  async handleInteractivityMessage(data) {
+    const message = await this.__filterInteractivityMessage(data);
+
+    if (message && message.callback_id && message.actions[0] && message.actions[0].selected_options[0]) {
+      const action = message.actions[0];
+      const userId = message.callback_id;
+      const { value } = action.selected_options[0];
+
+      if (await this.isValidSelectedOption(userId, value)) {
+
+        const month = action.name === 'month' ? value : null;
+        const day = action.name === 'day' ? value : null;
+
+        if (month || day) {
+          BirthdayBot.editUserBirthday(message.callback_id, month, day);
+
+          const birthdayUser = await this.__getBirthdayUser(message.callback_id);
+          await this.__usersListResponse(
+            { channel: message.channel.id, ts: message.message_ts },
+            BirthdayBot.renderUsersListAttachment(birthdayUser),
+          );
+
+        } else {
+          console.log('wrong action name')
+        }
+      }
+    }
+  }
+
+  /**
+   * @param userId
+   * @param optionValue
+   * @returns {Promise<*>}
+   */
+  async isValidSelectedOption(userId, optionValue) {
+    const months = BirthdayBot.getMonths();
+    const user = await this.__getBirthdayUser(userId);
+
+    if (!user) {
+      return false;
+    }
+
+    const { birthday } = user;
+    const month = months[optionValue];
+    const day = parseInt(optionValue, 10);
+
+    return (month || (user.birthday && (((day ^ 0) === day) && months[birthday.month]['days'] >= day)));
+  }
+
+
+  /**
+   * @param data
+   * @returns {Promise<*>}
+   * @private
+   */
+  async __filterInteractivityMessage(data) {
+    const message = data.payload ? BirthdayBot.jsonParse(data.payload) : false;
+
+    if (message && message.actions && message.channel && message.channel.id && await this.__isPrivateBotChannel(message.channel.id)) {
+      return message;
+    }
+
+    return false;
+  }
+
+
+  /**
     * @private
     */
   async __subscribe() {
@@ -54,7 +275,7 @@ module.exports = new class BirthdayBot {
     this.rtm.on('message', async data => {
       if ((data.type === 'message') && !this.__isBotMessage(data)) {
 
-        if (await this.__isPrivateBotChannel(data.channel)) {
+        if (await this.__isPrivateBotChannel(data.channel) && data.text) {
           await this.__handleMessage(data);
         }
       }
@@ -69,14 +290,22 @@ module.exports = new class BirthdayBot {
   async __handleMessage(data) {
     switch (true) {
       case(data.text.includes('help')):
-        await this.__helpResponse(data);
+        const user = await this.__getUserById(data.user);
+        await this.__postMessage({
+          channel: data.channel,
+          icon_emoji: ':sunglasses:',
+          text: `I am glad to see you ${user.real_name}, you can use following commands:`,
+          attachments:[
+            {
+              text: '`list` You can check and edit users birthday list',
+              color: 'good',
+              mrkdwn_in: ['text']
+            }
+          ],
+        });
         break;
-      case(data.text.includes('users:list')):
-        await this.__usersBirthdayDatesResponse(data);
-        break;
-      case(data.text.includes('users:edit')):
-        await this.__editUserBirthdayDate(data);
-        await this.__usersBirthdayDatesResponse(data);
+      case(data.text.includes('list')):
+        await this.__usersListResponse({ channel: data.channel });
         break;
       default:
         const text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
@@ -85,102 +314,30 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @param data
+   * @param options
+   * @param userAttachment
    * @returns {Promise<void>}
    * @private
    */
-  async __editUserBirthdayDate(data) {
-    const textParts = data.text.split(':');
-
-    if ((textParts.length > 3) && (textParts[0] === 'users') && (textParts[1] === 'edit')) {
-      const dateParts = textParts[3].split('.');
-      if (dateParts.length === 3) {
-        const date = new Date(dateParts[2], dateParts[1], dateParts[0]);
-
-        if (date.getFullYear() && date.getMonth() && date.getDay()) {
-          const db = await this.__getDb();
-
-          if (!db.users[textParts[2]]) {
-            db.users[textParts[2]] = {};
-          }
-
-          db.users[textParts[2]].birthdayDate = `${dateParts[2]}.${dateParts[1]}.${dateParts[0]}`;
-          await this.__refreshDb(db);
-        }
-      }
-    }
-  }
-
-  /**
-   * @param data
-   * @returns {Promise<void>}
-   * @private
-   */
-  async __usersBirthdayDatesResponse(data) {
+  async __usersListResponse(options, userAttachment) {
     const birthdayUsers = await this.__getBirthdayUsers();
-    const attachments = [];
-    const now = new Date();
+
+    options.text = 'Birthday list';
+    options.attachments = [];
 
     Object.keys(birthdayUsers).forEach(userId => {
-      const user = birthdayUsers[userId];
-      const birthday = `${user.birthdayDate || 'is not defined'}`;
-
-      attachments.push({
-        color: user.birthdayDate ? 'good' : "danger",
-        text: `${user.real_name} (${user.id}) - ${birthday}  \n Set or edit birthday date - users:edit:${user.id}:22.08.${now.getFullYear()}`
-      });
+      if (userAttachment && (userAttachment.callback_id === userId)) {
+        options.attachments.push(userAttachment);
+      } else {
+        options.attachments.push(BirthdayBot.renderUsersListAttachment(birthdayUsers[userId]));
+      }
     });
 
-    await this.__postMessage({ channel: data.channel, text: "Users birthday list", attachments });
-  }
-
-  /**
-   * @param data
-   * @returns {Promise<void>}
-   * @private
-   */
-  async __helpResponse(data) {
-
-    await this.__postMessage({
-      channel: data.channel,
-      text: "Would you like to play a game?",
-      attachments: [
-        {
-          "text": "Choose a game to play",
-          "fallback": "You are unable to choose a game",
-          "callback_id": "wopr_game",
-          "color": "#3AA3E3",
-          "attachment_type": "default",
-          "actions": [
-            {
-              "name": "game",
-              "text": "Chess",
-              "type": "button",
-              "value": "chess"
-            },
-            {
-              "name": "game",
-              "text": "Falken's Maze",
-              "type": "button",
-              "value": "maze"
-            },
-            {
-              "name": "game",
-              "text": "Thermonuclear War",
-              "style": "danger",
-              "type": "button",
-              "value": "war",
-              "confirm": {
-                "title": "Are you sure?",
-                "text": "Wouldn't you prefer a good game of chess?",
-                "ok_text": "Yes",
-                "dismiss_text": "No"
-              }
-            }
-          ]
-        }
-      ]
-    });
+    if (options.ts) {
+      await this.__updateChatMessage(options);
+    } else {
+      await this.__postMessage(options);
+    }
   }
 
   /**
@@ -188,7 +345,7 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __getBirthdayUsers() {
-    const db = this.__getDb();
+    const db = BirthdayBot.getDb();
     const users = await this.__getUsers();
     const birthdayUsers = {};
 
@@ -197,12 +354,24 @@ module.exports = new class BirthdayBot {
         birthdayUsers[user.id] = { ...user };
 
         if (db.users[user.id]) {
-          birthdayUsers[user.id].birthdayDate = db.users[user.id].birthdayDate;
+          birthdayUsers[user.id]['birthday'] = db.users[user.id].birthday;
         }
       }
     });
 
     return birthdayUsers;
+  }
+
+
+  /**
+   * @param userId
+   * @returns {Promise<*|null>}
+   * @private
+   */
+  async __getBirthdayUser(userId) {
+    const birthdayUsers = await this.__getBirthdayUsers();
+
+    return birthdayUsers[userId] || null;
   }
 
   /**
@@ -242,6 +411,20 @@ module.exports = new class BirthdayBot {
   }
 
   /**
+   * @param userId
+   * @returns {Promise<boolean>}
+   * @private
+   */
+  async __getUserById(userId) {
+    const users = await this.__getUsers();
+    return users.find(user => {
+      if (user.id === userId) {
+        return user;
+      }
+    });
+  }
+
+  /**
    * @returns {Promise<any>}
    * @private
    */
@@ -251,24 +434,11 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @returns {{}}
+   * @param options
+   * @returns {Promise<void>}
+   * @private
    */
-  __getDb() {
-    if (fs.existsSync(BirthdayBot.DB_FILE_PATH)) {
-      const db = fs.readFileSync(BirthdayBot.DB_FILE_PATH);
-      return JSON.parse(db);
-    }
-
-    return {
-      manager: false,
-      users: {},
-    };
-  }
-
-  /**
-   * @param data
-   */
-  __refreshDb(data) {
-    fs.writeFileSync(BirthdayBot.DB_FILE_PATH, JSON.stringify(data));
+  async __updateChatMessage(options) {
+    await this.web.chat.update(options);
   }
 }();

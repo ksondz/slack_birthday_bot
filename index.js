@@ -25,6 +25,12 @@ router.post('/botEvents', async ctx => {
   ctx.body = { challenge: body.challenge };
 });
 
+router.post('/interactivity', async ctx => {
+  const { body } = ctx.request;
+
+  await birthdayBot.handleInteractivityMessage(body);
+});
+
 app.use(router.routes());
 
 app.listen(8000);
