@@ -66,6 +66,11 @@ module.exports = new class BirthdayBot {
     return {};
   }
 
+  static getUserBirthdayTimestamp()
+  {
+
+  }
+
   /**
    * @param user
    * @param month
@@ -359,7 +364,6 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __managerResponse(options, text) {
-    const welcomeOptions = { ...options };
     options.text = 'Wrong command. Type `help` to see commands list';
     const matched = text.match(/<@(.*)>/);
 
@@ -390,9 +394,11 @@ module.exports = new class BirthdayBot {
 
 
   async cronJob() {
+    const users = await this.__getBirthdayUsers();
+    const userBirthdayDates = [];
+    users.forEach(user => {
 
-
-
+    })
   }
 
 
@@ -527,7 +533,6 @@ module.exports = new class BirthdayBot {
     const result = await this.web.conversations.members({ channel: channelId });
     return result && result.members ? result.members.filter(member => member && !member.deleted) : [];
   }
-
 
   /**
    * @param channelName
