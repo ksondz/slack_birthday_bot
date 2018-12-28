@@ -160,6 +160,23 @@ module.exports = new class BirthdayBot {
 
 
   /**
+   * @param items
+   * @param callback
+   * @returns {Promise<any[] | Array>}
+   */
+  static async asyncForEach(items, callback) {
+    const promises = [];
+
+    items.forEach(item => {
+      promises.push(callback(item));
+    });
+
+    const result = await Promise.all(promises);
+    return result || [];
+  }
+
+
+  /**
    * @param token
    * @param channelName
    */
@@ -416,11 +433,18 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @returns {Promise<any>}
+   * @returns {Promise<Array>}
    * @private
    */
   async __getUsers() {
-    return await this.__getConversationUsers(this.channelId);
+    const users = [];
+    const conversationUsers = await this.__getConversationUsers(this.channelId);
+    await BirthdayBot.asyncForEach(conversationUsers, async userId => {
+      const result = await this.web.users.info({ user: userId });
+      if (result && result.ok) users.push(result.user);
+    });
+
+    return users;
   }
 
 
