@@ -25,7 +25,8 @@ router.post('/birthday/interactivity', async ctx => {
 
 app.use(router.routes());
 
-app.listen(8000);
+const port = process.env.port || 8000;
+app.listen(port);
 
 console.log("Server up and listening");
 
