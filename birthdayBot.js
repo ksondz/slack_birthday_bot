@@ -179,21 +179,13 @@ module.exports = new class BirthdayBot {
     (async () => {
       const channel = await this.__getChannelByName(channelName);
       this.channelId = channel.id || '';
-      await this.authenticate();
 
+      const authTest = await this.web.auth.test();
+      await this.__setBotUser(authTest.user_id);
 
       await this.rtm.start();
       await this.__subscribe();
     })();
-  }
-
-  /**
-   * @returns {Promise<void>}
-   */
-  async authenticate(){
-    const authTest = await this.web.auth.test();
-    const user = await this.__getUserById(authTest.user_id);
-    if (user && (user.id === authTest.user_id)) this.authUser = user;
   }
 
   /**
@@ -218,24 +210,26 @@ module.exports = new class BirthdayBot {
    */
   async __handleMessage(data) {
     const options = { channel: data.channel, icon_emoji: ':sunglasses:' };
+    const managerId = BirthdayBot.getDb()['manager'];
+    const userInfo = await this.__getUserInfo(data.user);
+    const { user } = userInfo;
 
-    switch (true) {
-      case(data.text.includes('help')):
-        const user = await this.__getUserById(data.user);
-        options.text = `I am glad to see you ${user.real_name || user.name}, you can use following commands:`;
-        options.attachments = [{
-          text: '`list` - You can check and edit users birthday list',
-          color: 'good',
-          mrkdwn_in: ['text']
-        }];
-        await this.__postMessage(options);
-        break;
-      case(data.text.includes('list')):
-        await this.__usersListResponse(options);
-        break;
-      default:
-        options.text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
-        await this.__postMessage(options);
+    if (userInfo.ok && !userInfo.deleted && (user.is_admin || (user.id === managerId))) {
+
+      switch (true) {
+        case(data.text.includes('help')):
+          await this.__helpResponse(options, user);
+          break;
+        case(data.text.includes('list')):
+          await this.__usersListResponse(options);
+          break;
+        case(data.text.includes('manager')):
+          await this.__managerResponse(options, data.text);
+          break;
+        default:
+          options.text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
+          await this.__postMessage(options);
+      }
     }
   }
 
@@ -334,6 +328,56 @@ module.exports = new class BirthdayBot {
     }
   }
 
+  /**
+   *
+   * @param options
+   * @param user
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __helpResponse(options, user) {
+    options.text = `I am glad to see you ${user.real_name || user.name}, you can use following commands:`;
+    options.attachments = [
+      {
+        text: '`list` - You can check and edit users birthday list',
+        color: 'good',
+        mrkdwn_in: ['text']
+      },
+      {
+        text: '`manager @AnySlackUser` - You can choose a manager who has permissions to work with birthday bot. Just type `manager` then type `@` and manager name',
+        color: 'good',
+        mrkdwn_in: ['text']
+      },
+    ];
+    await this.__postMessage(options);
+  }
+
+  /**
+   * @param options
+   * @param text
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __managerResponse(options, text) {
+    options.text = 'Wrong command. Type `help` to see commands list';
+    const matched = text.match(/<@(.*)>/);
+
+    if (matched && (matched.length === 2)) {
+      const info = await this.__getUserInfo(matched[1]);
+      if (info.ok && !info.user.is_bot) {
+        const db = BirthdayBot.getDb();
+
+        db.manager = info.user.id;
+        BirthdayBot.refreshDb(db);
+
+        options.text = `${info.user.real_name || info.user.name} was defined as a Manager of DA-14 Birthday Bot`;
+      }
+    }
+    await this.__postMessage(options);
+  }
+
+
+
   async cronJob() {
 
 
@@ -365,17 +409,6 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @param userId
-   * @returns {Promise<*|null>}
-   * @private
-   */
-  async __getBirthdayUser(userId) {
-    const birthdayUsers = await this.__getBirthdayUsers();
-
-    return birthdayUsers[userId] || null;
-  }
-
-  /**
    * @param options
    * @returns {Promise<void>}
    * @private
@@ -398,7 +431,7 @@ module.exports = new class BirthdayBot {
    * @private
    */
   __isBotMessage(data) {
-    return (data.bot_id === this.authUser.profile.bot_id);
+    return (data.bot_id === this.botUser.profile.bot_id);
   }
 
   /**
@@ -407,8 +440,18 @@ module.exports = new class BirthdayBot {
    * @returns {Promise<WebAPICallResult | boolean>}
    */
   async __isPrivateBotChannel(channelId) {
-    const users = await this.__getConversationUsers(channelId);
-    return (users.length === 2) && users.includes(this.authUser.id);
+    const userIds = await this.__getConversationUsers(channelId);
+    return (userIds.length === 2) && userIds.includes(this.botUser.id);
+  }
+
+  /**
+   * @param userId
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __setBotUser(userId) {
+    const user = await this.__getUserById(userId);
+    if (user && (user.id === userId)) this.botUser = user;
   }
 
   /**
@@ -454,6 +497,15 @@ module.exports = new class BirthdayBot {
         return user;
       }
     });
+  }
+
+  /**
+   * @param user
+   * @returns {Promise<WebAPICallResult>}
+   * @private
+   */
+  async __getUserInfo(user) {
+    return await this.web.users.info({user});
   }
 
   /**
