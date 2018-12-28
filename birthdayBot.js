@@ -90,7 +90,7 @@ module.exports = new class BirthdayBot {
   static renderUsersListAttachment(user) {
     let actions = BirthdayBot.getUserSelectActions(user);
 
-    let text = `${user.real_name} - `;
+    let text = `${user.real_name || user.name} - `;
     let color = 'danger';
 
     switch (true) {
@@ -234,7 +234,7 @@ module.exports = new class BirthdayBot {
     switch (true) {
       case(data.text.includes('help')):
         const user = await this.__getUserById(data.user);
-        options.text = `I am glad to see you ${user.real_name}, you can use following commands:`;
+        options.text = `I am glad to see you ${user.real_name || user.name}, you can use following commands:`;
         options.attachments = [{
           text: '`list` - You can check and edit users birthday list',
           color: 'good',
