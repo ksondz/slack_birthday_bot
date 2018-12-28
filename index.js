@@ -8,7 +8,10 @@ const koaBody = require('koa-body');
 const birthdayBot = require('./birthdayBot');
 
 const app = new Koa();
-app.use(koaBody());
+app.use(koaBody({
+  jsonLimit: '20MB',
+  formLimit: '20MB',
+}));
 
 
 router.get('/', async ctx => {
@@ -34,3 +37,4 @@ console.log("Server up and listening");
 // 2. за неделю создать чат для выбора подарка именинникам
 // 3. за 1 день напомнить, что Др завтра (только в будние)
 // 4. в день ДР напомнить всем в 9.30, что ДР сегодня + поздравляшка (если возможно)
+// http://da-14.org:8321/birthday/interactivity

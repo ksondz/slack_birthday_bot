@@ -67,19 +67,23 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @param userId
+   * @param user
    * @param month
    * @param day
    */
-  static editUserBirthday(userId, month = null, day = null) {
+  static editUserBirthday(user, month = null, day = null) {
     const db = BirthdayBot.getDb();
+    const dbUser = db.users[user.id] = db.users[user.id] || {};
 
-    if (!db.users[userId]) {
-      db.users[userId] = { birthday: { month, day } };
-    } else {
-      db.users[userId].birthday.month = month || db.users[userId].birthday.month;
-      db.users[userId].birthday.day = day || db.users[userId].birthday.day;
+    const birthday = { month, day };
+
+    if (dbUser.birthday) {
+      birthday.month = month || dbUser.birthday.month;
+      birthday.day = day || dbUser.birthday.day;
     }
+
+    dbUser.birthday = birthday;
+    user.birthday = birthday;
 
     BirthdayBot.refreshDb(db);
   }
@@ -157,23 +161,6 @@ module.exports = new class BirthdayBot {
       }
       daySelect.options.push(dayOption);
     }
-  }
-
-
-  /**
-   * @param items
-   * @param callback
-   * @returns {Promise<any[] | Array>}
-   */
-  static async asyncForEach(items, callback) {
-    const promises = [];
-
-    items.forEach(item => {
-      promises.push(callback(item));
-    });
-
-    const result = await Promise.all(promises);
-    return result || [];
   }
 
 
@@ -260,29 +247,40 @@ module.exports = new class BirthdayBot {
     const message = await this.__filterInteractivityMessage(data);
 
     if (message && message.callback_id && message.actions[0] && message.actions[0].type === 'select') {
-      const isValidOption = await this.isValidSelectedOption(message.callback_id, message.actions[0].selected_options[0].value);
+      const birthdayUsers = await this.__getBirthdayUsers();
+      const user = birthdayUsers[message.callback_id];
 
-      if (isValidOption) {
-        await this.interactivitySelectMessage(message);
+      if (user) {
+        const months = BirthdayBot.getMonths();
+        const { birthday } = user;
+
+        const month = months[message.actions[0].selected_options[0].value];
+        const day = parseInt(message.actions[0].selected_options[0].value, 10);
+
+        if (!!month || (!!birthday && (((day ^ 0) === day) && months[birthday.month]['days'] >= day))) {
+          const { message_ts, channel, actions } = message;
+          await this.interactivitySelectMessage(message_ts, channel, actions, user);
+        }
       }
     }
   }
 
   /**
-   * @param message
+   * @param message_ts
+   * @param channel
+   * @param actions
+   * @param user
    * @returns {Promise<void>}
    */
-  async interactivitySelectMessage(message) {
-    const { callback_id, message_ts, channel, actions } = message;
+  async interactivitySelectMessage(message_ts, channel, actions, user) {
     const actionName = actions[0].name;
 
     const month = actionName === 'month' ? actions[0].selected_options[0].value : null;
     const day = actionName === 'day' ? actions[0].selected_options[0].value : null;
 
     if (month || day) {
-      BirthdayBot.editUserBirthday(callback_id, month, day);
+      BirthdayBot.editUserBirthday(user, month, day);
 
-      const user = await this.__getBirthdayUser(callback_id);
       const attachment = BirthdayBot.renderUsersListAttachment(user);
       await this.__usersListResponse({ channel: channel.id, ts: message_ts }, attachment);
     } else {
@@ -307,27 +305,6 @@ module.exports = new class BirthdayBot {
 
     return false;
   }
-
-  /**
-   * @param userId
-   * @param optionValue
-   * @returns {Promise<*>}
-   */
-  async isValidSelectedOption(userId, optionValue) {
-    const months = BirthdayBot.getMonths();
-    const user = await this.__getBirthdayUser(userId);
-
-    if (!user) {
-      return false;
-    }
-
-    const { birthday } = user;
-    const month = months[optionValue];
-    const day = parseInt(optionValue, 10);
-
-    return (!!month || (!!birthday && (((day ^ 0) === day) && months[birthday.month]['days'] >= day)));
-  }
-
 
   /**
    * @param options
@@ -357,7 +334,7 @@ module.exports = new class BirthdayBot {
     }
   }
 
-  async __cronJob() {
+  async cronJob() {
 
 
 
@@ -440,10 +417,16 @@ module.exports = new class BirthdayBot {
    */
   async __getUsers() {
     const users = [];
+
+    const allUsers = await this.__getAllUsers();
     const conversationUsers = await this.__getConversationUsers(this.channelId);
-    await BirthdayBot.asyncForEach(conversationUsers, async userId => {
-      const result = await this.web.users.info({ user: userId });
-      if (!!result && result.ok && !!result.user && !result.user.deleted) users.push(result.user);
+
+    allUsers.forEach(user => {
+      conversationUsers.forEach(userId => {
+        if (user.id === userId) {
+          users.push(user);
+        }
+      });
     });
 
     return users;
@@ -456,7 +439,7 @@ module.exports = new class BirthdayBot {
    */
   async __getAllUsers() {
     const usersList = await this.web.users.list();
-    return (usersList && usersList.members) ? usersList.members : [];
+    return (usersList && usersList.members) ? usersList.members.filter(member => member && !member.deleted) : [];
   }
 
   /**
@@ -479,10 +462,15 @@ module.exports = new class BirthdayBot {
    */
   async __getConversationUsers(channelId) {
     const result = await this.web.conversations.members({ channel: channelId });
-    return result && result.members ? result.members : [];
+    return result && result.members ? result.members.filter(member => member && !member.deleted) : [];
   }
 
 
+  /**
+   * @param channelName
+   * @returns {Promise<*>}
+   * @private
+   */
   async __getChannelByName(channelName) {
     const result = await this.web.conversations.list();
 
