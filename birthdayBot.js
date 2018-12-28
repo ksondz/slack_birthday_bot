@@ -2,8 +2,37 @@
 const fs = require('fs');
 const moment = require('moment');
 const { WebClient, RTMClient } = require('@slack/client');
+const { token } = process.env;
 
 module.exports = new class BirthdayBot {
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get DB_FILE_PATH() {
+    return './birthdays-db.json';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get MONTHS_FILE_PATH() {
+    return './months.json';
+  }
+
+  /**
+   * @param descriptionString
+   * @returns {*}
+   */
+  static jsonParse(descriptionString) {
+    try {
+      return JSON.parse(descriptionString);
+    } catch (e) {
+      return false;
+    }
+  }
 
   /**
    * @returns {*}
@@ -76,13 +105,7 @@ module.exports = new class BirthdayBot {
         text += 'birthday is not defined';
     }
 
-    return {
-      text,
-      actions,
-      color,
-      fallback: 'You can not edit users',
-      callback_id: `${user.id}`,
-    };
+    return { text, actions, color, fallback: 'You can not edit users', callback_id: `${user.id}`};
   }
 
   /**
@@ -135,53 +158,24 @@ module.exports = new class BirthdayBot {
     }
   }
 
-  /**
-   * @returns {string}
-   * @constructor
-   */
-  static get DB_FILE_PATH() {
-    return './birthdays-db.json';
-  }
 
   /**
-   * @returns {string}
-   * @constructor
+   * @param token
    */
-  static get MONTHS_FILE_PATH() {
-    return './months.json';
-  }
-
-  /**
-   * @param descriptionString
-   * @returns {*}
-   */
-  static jsonParse(descriptionString) {
-    try {
-      return JSON.parse(descriptionString);
-    } catch (e) {
-      return false;
-    }
-  }
-
-
-  constructor() {
-    const { token } = process.env;
+  constructor(token) {
     if (!token) {
       throw new Error('Please create .env file in the root application folder. You can copy .env-example.');
     }
 
     this.rtm = new RTMClient(token);
     this.web = new WebClient(token);
-  }
 
-  /**
-   * @returns {Promise<void>}
-   */
-  async start() {
-    await this.authenticate();
+    (async () => {
+      await this.authenticate();
 
-    await this.rtm.start();
-    await this.__subscribe();
+      await this.rtm.start();
+      await this.__subscribe();
+    })();
   }
 
   /**
@@ -189,12 +183,51 @@ module.exports = new class BirthdayBot {
    */
   async authenticate(){
     const authTest = await this.web.auth.test();
-    const users = await this.__getUsers();
-    users.forEach(user => {
-      if (user.id === authTest.user_id) {
-        this.authUser = user;
+    const user = await this.__getUserById(authTest.user_id);
+    if (user && (user.id === authTest.user_id)) this.authUser = user;
+  }
+
+  /**
+   * @private
+   */
+  async __subscribe() {
+
+    this.rtm.on('message', async data => {
+      if ((data.type === 'message') && !this.__isBotMessage(data)) {
+
+        if (await this.__isPrivateBotChannel(data.channel) && data.text) {
+          await this.__handleMessage(data);
+        }
       }
     });
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __handleMessage(data) {
+    const options = { channel: data.channel, icon_emoji: ':sunglasses:' };
+
+    switch (true) {
+      case(data.text.includes('help')):
+        const user = await this.__getUserById(data.user);
+        options.text = `I am glad to see you ${user.real_name}, you can use following commands:`;
+        options.attachments = [{
+          text: '`list` - You can check and edit users birthday list',
+          color: 'good',
+          mrkdwn_in: ['text']
+        }];
+        await this.__postMessage(options);
+        break;
+      case(data.text.includes('list')):
+        await this.__usersListResponse(options);
+        break;
+      default:
+        options.text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
+        await this.__postMessage(options);
+    }
   }
 
   /**
@@ -204,30 +237,53 @@ module.exports = new class BirthdayBot {
   async handleInteractivityMessage(data) {
     const message = await this.__filterInteractivityMessage(data);
 
-    if (message && message.callback_id && message.actions[0] && message.actions[0].selected_options[0]) {
-      const action = message.actions[0];
-      const userId = message.callback_id;
-      const { value } = action.selected_options[0];
+    if (message && message.callback_id && message.actions[0] && message.actions[0].type === 'select') {
+      const isValidOption = await this.isValidSelectedOption(message.callback_id, message.actions[0].selected_options[0].value);
 
-      if (await this.isValidSelectedOption(userId, value)) {
-
-        const month = action.name === 'month' ? value : null;
-        const day = action.name === 'day' ? value : null;
-
-        if (month || day) {
-          BirthdayBot.editUserBirthday(message.callback_id, month, day);
-
-          const birthdayUser = await this.__getBirthdayUser(message.callback_id);
-          await this.__usersListResponse(
-            { channel: message.channel.id, ts: message.message_ts },
-            BirthdayBot.renderUsersListAttachment(birthdayUser),
-          );
-
-        } else {
-          console.log('wrong action name')
-        }
+      if (isValidOption) {
+        await this.interactivitySelectMessage(message);
       }
     }
+  }
+
+  /**
+   * @param message
+   * @returns {Promise<void>}
+   */
+  async interactivitySelectMessage(message) {
+    const { callback_id, message_ts, channel, actions } = message;
+    const actionName = actions[0].name;
+
+    const month = actionName === 'month' ? actions[0].selected_options[0].value : null;
+    const day = actionName === 'day' ? actions[0].selected_options[0].value : null;
+
+    if (month || day) {
+      BirthdayBot.editUserBirthday(callback_id, month, day);
+
+      const user = await this.__getBirthdayUser(callback_id);
+      const attachment = BirthdayBot.renderUsersListAttachment(user);
+      await this.__usersListResponse({ channel: channel.id, ts: message_ts }, attachment);
+    } else {
+      console.log('wrong action name')
+    }
+  }
+
+  /**
+   * @param data
+   * @returns {Promise<*>}
+   * @private
+   */
+  async __filterInteractivityMessage(data) {
+    const message = data.payload ? BirthdayBot.jsonParse(data.payload) : false;
+
+    if (
+      (message && (message.type === 'interactive_message') && message.actions) &&
+      (message.channel && message.channel.id && await this.__isPrivateBotChannel(message.channel.id))
+    ) {
+      return message;
+    }
+
+    return false;
   }
 
   /**
@@ -247,71 +303,9 @@ module.exports = new class BirthdayBot {
     const month = months[optionValue];
     const day = parseInt(optionValue, 10);
 
-    return (month || (user.birthday && (((day ^ 0) === day) && months[birthday.month]['days'] >= day)));
+    return (!!month || (!!birthday && (((day ^ 0) === day) && months[birthday.month]['days'] >= day)));
   }
 
-
-  /**
-   * @param data
-   * @returns {Promise<*>}
-   * @private
-   */
-  async __filterInteractivityMessage(data) {
-    const message = data.payload ? BirthdayBot.jsonParse(data.payload) : false;
-
-    if (message && message.actions && message.channel && message.channel.id && await this.__isPrivateBotChannel(message.channel.id)) {
-      return message;
-    }
-
-    return false;
-  }
-
-
-  /**
-    * @private
-    */
-  async __subscribe() {
-
-    this.rtm.on('message', async data => {
-      if ((data.type === 'message') && !this.__isBotMessage(data)) {
-
-        if (await this.__isPrivateBotChannel(data.channel) && data.text) {
-          await this.__handleMessage(data);
-        }
-      }
-    });
-  }
-
-  /**
-   * @param data
-   * @returns {Promise<void>}
-   * @private
-   */
-  async __handleMessage(data) {
-    switch (true) {
-      case(data.text.includes('help')):
-        const user = await this.__getUserById(data.user);
-        await this.__postMessage({
-          channel: data.channel,
-          icon_emoji: ':sunglasses:',
-          text: `I am glad to see you ${user.real_name}, you can use following commands:`,
-          attachments:[
-            {
-              text: '`list` You can check and edit users birthday list',
-              color: 'good',
-              mrkdwn_in: ['text']
-            }
-          ],
-        });
-        break;
-      case(data.text.includes('list')):
-        await this.__usersListResponse({ channel: data.channel });
-        break;
-      default:
-        const text = 'Man, I don\'t understand you. I\'m just a bot, you know.. \n Try typing `help` to see what I can do.';
-        await this.__postMessage({ channel: data.channel, text, icon_emoji: ':sunglasses:' });
-    }
-  }
 
   /**
    * @param options
@@ -375,11 +369,20 @@ module.exports = new class BirthdayBot {
   }
 
   /**
-   * @param params
+   * @param options
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __updateChatMessage(options) {
+    await this.web.chat.update(options);
+  }
+
+  /**
+   * @param options
    * @returns {Promise<WebAPICallResult>}
    */
-  async __postMessage(params = {}) {
-    return await this.web.chat.postMessage(params);
+  async __postMessage(options = {}) {
+    return await this.web.chat.postMessage(options);
   }
 
   /**
@@ -432,13 +435,4 @@ module.exports = new class BirthdayBot {
     const result = await this.web.conversations.members({ channel: channelId });
     return result && result.members ? result.members : [];
   }
-
-  /**
-   * @param options
-   * @returns {Promise<void>}
-   * @private
-   */
-  async __updateChatMessage(options) {
-    await this.web.chat.update(options);
-  }
-}();
+}(token);
