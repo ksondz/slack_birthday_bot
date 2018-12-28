@@ -344,7 +344,7 @@ module.exports = new class BirthdayBot {
         mrkdwn_in: ['text']
       },
       {
-        text: '`manager @AnySlackUser` - You can choose a manager who has permissions to work with birthday bot. Just type `manager` then type `@` and manager name',
+        text: '`manager @AnySlackUser` - You can set a birthday bot manager . \n Just type `manager` then `@` and user name',
         color: 'good',
         mrkdwn_in: ['text']
       },
@@ -359,6 +359,7 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __managerResponse(options, text) {
+    const welcomeOptions = { ...options };
     options.text = 'Wrong command. Type `help` to see commands list';
     const matched = text.match(/<@(.*)>/);
 
@@ -369,6 +370,16 @@ module.exports = new class BirthdayBot {
 
         db.manager = info.user.id;
         BirthdayBot.refreshDb(db);
+
+        // const channel = await this.web.channels.create({ name: 'welcome manager' });
+        // if (channel.ok) {
+        //   const welcomeOption = {
+        //     channel: channel.id,
+        //     icon_emoji: options.icon_emoji,
+        //     text: `Hello ${info.user.real_name || info.user.name}! You are a new Manager of DA-14 Birthday Bot`
+        //   };
+        //   await this.__postMessage(welcomeOption);
+        // }
 
         options.text = `${info.user.real_name || info.user.name} was defined as a Manager of DA-14 Birthday Bot`;
       }
