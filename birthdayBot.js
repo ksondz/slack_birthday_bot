@@ -1,6 +1,7 @@
 
 const fs = require('fs');
 const moment = require('moment');
+const _ = require('lodash');
 const { WebClient, RTMClient } = require('@slack/client');
 const { token, channel } = process.env;
 
@@ -335,7 +336,8 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __usersListResponse(options, userAttachment) {
-    const birthdayUsers = await this.__getBirthdayUsers();
+    let birthdayUsers = await this.__getBirthdayUsers();
+    birthdayUsers = _.orderBy(birthdayUsers, ['real_name'],['asc']);
 
     options.text = 'Birthday list';
     options.attachments = [];

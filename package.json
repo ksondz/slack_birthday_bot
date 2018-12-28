@@ -1,5 +1,5 @@
 {
-  "name": "slack-bot",
+  "name": "slack-birthday-bot",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -10,13 +10,12 @@
   "license": "ISC",
   "dependencies": {
     "@slack/client": "^4.8.0",
-    "axios": "^0.18.0",
     "dotenv": "^6.2.0",
     "googleapis": "^27.0.0",
     "koa": "^2.6.2",
     "koa-body": "^4.0.4",
     "koa-router": "^7.4.0",
-    "moment": "^2.23.0",
-    "slackbots": "^1.2.0"
+    "lodash": "^4.17.11",
+    "moment": "^2.23.0"
   }
 }
