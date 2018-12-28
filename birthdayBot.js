@@ -2,7 +2,7 @@
 const fs = require('fs');
 const moment = require('moment');
 const { WebClient, RTMClient } = require('@slack/client');
-const { token } = process.env;
+const { token, channel } = process.env;
 
 module.exports = new class BirthdayBot {
 
@@ -161,8 +161,9 @@ module.exports = new class BirthdayBot {
 
   /**
    * @param token
+   * @param channelName
    */
-  constructor(token) {
+  constructor(token, channelName) {
     if (!token) {
       throw new Error('Please create .env file in the root application folder. You can copy .env-example.');
     }
@@ -171,7 +172,10 @@ module.exports = new class BirthdayBot {
     this.web = new WebClient(token);
 
     (async () => {
+      const channel = await this.__getChannelByName(channelName);
+      this.channelId = channel.id || '';
       await this.authenticate();
+
 
       await this.rtm.start();
       await this.__subscribe();
@@ -416,8 +420,7 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __getUsers() {
-    const usersList = await this.web.users.list();
-    return (usersList && usersList.members) ? usersList.members : [];
+    return await this.__getConversationUsers(this.channelId);
   }
 
   /**
@@ -442,4 +445,15 @@ module.exports = new class BirthdayBot {
     const result = await this.web.conversations.members({ channel: channelId });
     return result && result.members ? result.members : [];
   }
-}(token);
+
+
+  async __getChannelByName(channelName) {
+    const result = await this.web.conversations.list();
+
+    return result.channels.find(channel => {
+      if (channel.name === channelName) {
+        return channel;
+      }
+    });
+  }
+}(token, channel);
