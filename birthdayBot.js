@@ -334,14 +334,22 @@ module.exports = new class BirthdayBot {
     }
   }
 
+  async __cronJob() {
+
+
+
+  }
+
+
   /**
    * @returns {Promise<void>}
    * @private
    */
   async __getBirthdayUsers() {
+    const birthdayUsers = {};
+
     const db = BirthdayBot.getDb();
     const users = await this.__getUsers();
-    const birthdayUsers = {};
 
     users.forEach(user => {
       if (!user.is_bot && user.profile && user.profile.email) {
@@ -355,7 +363,6 @@ module.exports = new class BirthdayBot {
 
     return birthdayUsers;
   }
-
 
   /**
    * @param userId
