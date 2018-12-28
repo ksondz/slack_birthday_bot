@@ -443,7 +443,7 @@ module.exports = new class BirthdayBot {
     const conversationUsers = await this.__getConversationUsers(this.channelId);
     await BirthdayBot.asyncForEach(conversationUsers, async userId => {
       const result = await this.web.users.info({ user: userId });
-      if (result && result.ok) users.push(result.user);
+      if (!!result && result.ok && !!result.user && !result.user.deleted) users.push(result.user);
     });
 
     return users;
