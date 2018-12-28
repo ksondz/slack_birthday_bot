@@ -423,13 +423,23 @@ module.exports = new class BirthdayBot {
     return await this.__getConversationUsers(this.channelId);
   }
 
+
+  /**
+   * @returns {Promise<any>}
+   * @private
+   */
+  async __getAllUsers() {
+    const usersList = await this.web.users.list();
+    return (usersList && usersList.members) ? usersList.members : [];
+  }
+
   /**
    * @param userId
    * @returns {Promise<boolean>}
    * @private
    */
   async __getUserById(userId) {
-    const users = await this.__getUsers();
+    const users = await this.__getAllUsers();
     return users.find(user => {
       if (user.id === userId) {
         return user;
