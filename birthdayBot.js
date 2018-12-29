@@ -7,6 +7,31 @@ const { token, channel } = process.env;
 
 module.exports = new class BirthdayBot {
 
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get USERS_LIST_TYPE() {
+    return 'list';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get READY_USERS_LIST_TYPE() {
+    return 'list:ready';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get NOT_READY_USERS_LIST_TYPE() {
+    return 'list:not:ready';
+  }
+
   /**
    * @returns {string}
    * @constructor
@@ -225,8 +250,14 @@ module.exports = new class BirthdayBot {
         case(data.text.includes('help')):
           await this.__helpResponse(options, user);
           break;
-        case(data.text.includes('list')):
+        case(data.text.includes(BirthdayBot.USERS_LIST_TYPE) && !data.text.includes(`${BirthdayBot.USERS_LIST_TYPE}:`)):
           await this.__usersListResponse(options);
+          break;
+        case(data.text.includes(BirthdayBot.READY_USERS_LIST_TYPE)):
+          await this.__usersListResponse(options, BirthdayBot.READY_USERS_LIST_TYPE);
+          break;
+        case(data.text.includes(BirthdayBot.NOT_READY_USERS_LIST_TYPE)):
+          await this.__usersListResponse(options, BirthdayBot.NOT_READY_USERS_LIST_TYPE);
           break;
         case(data.text.includes('manager')):
           await this.__managerResponse(options, data.text);
@@ -307,15 +338,17 @@ module.exports = new class BirthdayBot {
 
   /**
    * @param options
+   * @param type
    * @param userAttachment
    * @returns {Promise<void>}
    * @private
    */
-  async __usersListResponse(options, userAttachment) {
+  async __usersListResponse(options, type = BirthdayBot.USERS_LIST_TYPE, userAttachment) {
     let birthdayUsers = await this.__getBirthdayUsers();
     birthdayUsers = _.orderBy(birthdayUsers, ['real_name'],['asc']);
 
     options.text = 'Birthday list';
+    options.fallback = `You can not use ${type}`;
     options.attachments = [];
 
     Object.keys(birthdayUsers).forEach(userId => {
