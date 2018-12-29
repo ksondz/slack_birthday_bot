@@ -21,3 +21,8 @@
  1) The job should be run every day at 9 hours 30 minutes. 
  2) Use this route - `/birthday/cron`
  
+ ## Start
+ 1) `nvm use`
+ 2) `npm i`
+ 3) `node index.js` or if pm2 is installed you can run `run_pm2_server_process.sh` 
+ 
