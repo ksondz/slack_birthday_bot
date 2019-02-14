@@ -7,6 +7,31 @@ const { token, channel } = process.env;
 
 module.exports = new class BirthdayBot {
 
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get USERS_LIST_TYPE() {
+    return 'list';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get READY_USERS_LIST_TYPE() {
+    return 'list:ready';
+  }
+
+  /**
+   * @returns {string}
+   * @constructor
+   */
+  static get NOT_READY_USERS_LIST_TYPE() {
+    return 'list:not:ready';
+  }
+
   /**
    * @returns {string}
    * @constructor
@@ -100,7 +125,7 @@ module.exports = new class BirthdayBot {
   static renderUsersListAttachment(user) {
     let actions = BirthdayBot.getUserSelectActions(user);
 
-    let text = `${user.real_name || user.name} - `;
+    let text = `<@${user.id}> - `;
     let color = 'danger';
 
     switch (true) {
@@ -225,8 +250,14 @@ module.exports = new class BirthdayBot {
         case(data.text.includes('help')):
           await this.__helpResponse(options, user);
           break;
-        case(data.text.includes('list')):
+        case(data.text.includes(BirthdayBot.USERS_LIST_TYPE) && !data.text.includes(`${BirthdayBot.USERS_LIST_TYPE}:`)):
           await this.__usersListResponse(options);
+          break;
+        case(data.text.includes(BirthdayBot.READY_USERS_LIST_TYPE)):
+          await this.__usersListResponse(options, BirthdayBot.READY_USERS_LIST_TYPE);
+          break;
+        case(data.text.includes(BirthdayBot.NOT_READY_USERS_LIST_TYPE)):
+          await this.__usersListResponse(options, BirthdayBot.NOT_READY_USERS_LIST_TYPE);
           break;
         case(data.text.includes('manager')):
           await this.__managerResponse(options, data.text);
@@ -307,15 +338,17 @@ module.exports = new class BirthdayBot {
 
   /**
    * @param options
+   * @param type
    * @param userAttachment
    * @returns {Promise<void>}
    * @private
    */
-  async __usersListResponse(options, userAttachment) {
+  async __usersListResponse(options, type = BirthdayBot.USERS_LIST_TYPE, userAttachment) {
     let birthdayUsers = await this.__getBirthdayUsers();
     birthdayUsers = _.orderBy(birthdayUsers, ['real_name'],['asc']);
 
     options.text = 'Birthday list';
+    options.fallback = `You can not use ${type}`;
     options.attachments = [];
 
     Object.keys(birthdayUsers).forEach(userId => {
@@ -341,7 +374,7 @@ module.exports = new class BirthdayBot {
    * @private
    */
   async __helpResponse(options, user) {
-    options.text = `I am glad to see you ${user.real_name || user.name}, you can use following commands:`;
+    options.text = `I am glad to see you <@${user.id}>, you can use following commands:`;
     options.attachments = [
       {
         text: '`list` - You can check and edit users birthday list',
@@ -387,7 +420,8 @@ module.exports = new class BirthdayBot {
             await this.__postMessage(welcomeOption);
           }
 
-          options.text = `${info.user.real_name || info.user.name} was defined as a Manager of DA-14 Birthday Bot`;
+          options.text = `<@${info.user.id}> was defined as a Manager of DA-14 Birthday Bot`;
+
         } catch (e) {
           throw e;
         }
@@ -399,11 +433,67 @@ module.exports = new class BirthdayBot {
 
 
   async cronJob() {
-    const users = await this.__getBirthdayUsers();
-    const userBirthdayDates = [];
-    users.forEach(user => {
 
-    })
+    // await this.__createGroup();
+
+    // const birthdayDates = await this.__getBirthdayDates();
+    // const now = moment();
+    //
+    // Object.keys(birthdayDates).forEach(userId => {
+    //   const data = birthdayDates[userId];
+    // })
+  }
+
+
+  /**
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __createGroup() {
+    const birthdayUsers = this.__getBirthdayUsers();
+
+    const users = Object.keys(birthdayUsers);
+
+    const result = await this.web.usergroups.create({name: 'birthday group'});
+
+    if (result.ok) {
+      const { group } = result;
+    }
+
+
+
+
+
+
+
+  }
+
+
+  /**
+   * @returns {Promise<void>}
+   * @private
+   */
+  async __getBirthdayDates() {
+    const birthdayDates = {};
+    const birthdayUsers = await this.__getBirthdayUsers();
+    const months = BirthdayBot.getMonths();
+    const now = moment();
+
+    Object.keys(birthdayUsers).forEach(userId => {
+      const birthdayData = birthdayUsers[userId].birthday;
+
+      if (birthdayData.month && birthdayData.day) {
+        const month = months[birthdayData.month];
+        const day = parseInt(birthdayData.day, 10);
+
+        birthdayDates[userId] = {
+          id: userId,
+          date: moment(new Date(now.format('YYYY'), month.number, day)),
+        }
+      }
+    });
+
+    return birthdayDates;
   }
 
 
