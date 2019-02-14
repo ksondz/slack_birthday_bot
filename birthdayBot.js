@@ -349,7 +349,7 @@ module.exports = new class BirthdayBot {
         mrkdwn_in: ['text']
       },
       {
-        text: '`manager @AnySlackUser` - You can set a birthday bot manager . \n Just type `manager` then `@` and user name',
+        text: '`manager @AnySlackUser` - Set a birthday bot Manager . \n Just type `manager` then `@` and user name',
         color: 'good',
         mrkdwn_in: ['text']
       },
@@ -375,17 +375,22 @@ module.exports = new class BirthdayBot {
         db.manager = info.user.id;
         BirthdayBot.refreshDb(db);
 
-        // const channel = await this.web.channels.create({ name: 'welcome manager' });
-        // if (channel.ok) {
-        //   const welcomeOption = {
-        //     channel: channel.id,
-        //     icon_emoji: options.icon_emoji,
-        //     text: `Hello ${info.user.real_name || info.user.name}! You are a new Manager of DA-14 Birthday Bot`
-        //   };
-        //   await this.__postMessage(welcomeOption);
-        // }
+        try {
+          const channel = await this.web.channels.create({ name: 'welcome manager' });
 
-        options.text = `${info.user.real_name || info.user.name} was defined as a Manager of DA-14 Birthday Bot`;
+          if (channel.ok) {
+            const welcomeOption = {
+              channel: channel.id,
+              icon_emoji: options.icon_emoji,
+              text: `Hello ${info.user.real_name || info.user.name}! You are a new Manager of DA-14 Birthday Bot`
+            };
+            await this.__postMessage(welcomeOption);
+          }
+
+          options.text = `${info.user.real_name || info.user.name} was defined as a Manager of DA-14 Birthday Bot`;
+        } catch (e) {
+          throw e;
+        }
       }
     }
     await this.__postMessage(options);
